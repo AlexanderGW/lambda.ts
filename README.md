@@ -10,13 +10,13 @@
 ## What does it do?
 Provides a basic HTTP path routing system, for example `GET /product/foo`
 ```typescript
-import { create, responseJson } from 'lambda.ts';
+import { create } from 'lambda.ts';
 
 /** Shared function logic here... */
 
 const λ = create();
-λ.routeGet('/product/[s:%s]', (Δ) => {
-	return responseJson(Δ.pathData); // { s: 'foo' }
+λ.route('/product/[s:%s]').get((Δ) => {
+	return λ.response(Δ.pathData).json(); // { s: 'foo' }
 });
 
 export const handler = λ.handler;
@@ -25,13 +25,14 @@ export const handler = λ.handler;
 ...will provide S3 object manipulation
 
 ```typescript
-import { create, objectGet, responseJson } from 'lambda.ts';
+import { create } from 'lambda.ts';
 
 const λ = create();
-λ.routeGet('/', async () => {
-	const result = await objectGet('/foo/bar');
-	if (!result) return responseJson('Oops!', 500);
-	return responseJson(result.content);
+λ.route('/').get(async () => {
+	const obj = await λ.object('/foo/bar');
+	const result = obj.value();
+	if (!result) return λ.response('Oops!').code(500).text();
+	return λ.response(result).json();
 });
 
 export const handler = λ.handler;
@@ -40,17 +41,17 @@ export const handler = λ.handler;
 ...will provide NoSQL DynamoDB support
 
 ```typescript
-import { create, objectGet, responseJson } from 'lambda.ts';
+import { create } from 'lambda.ts';
 import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 
 const λ = create();
-λ.routeGet('/', async () => {
+λ.route('/').get(async () => {
 	try {
 		const client = new DynamoDBClient({ region: "REGION" });
-		const data = await client.send(command);
-		return responseJson(result.content);
+		const result = await client.send(command);
+		return λ.response(result).json();
 	} catch (error) {
-		return responseJson('Oops!', 500);
+		return λ.response('Oops!').code(500).text();
 	}
 });
 

@@ -1,52 +1,17 @@
-import { create, response, responseJson } from '../../src/lambda.ts';
+import { create } from '../../src/lambda.ts';
 
 const λ = create();
 
-λ.routeGet('/', () => {
-	return responseJson('foo');
-});
+λ.route('/').get(() => λ.response('foo').basic());
 
 // Return 204 on OPTIONS request
-λ.routeOptions('/foo', () => response(null, 204));
+λ.route('/foo').options(() => λ.response().code(204).basic());
 
-λ.routeGet('/foo', (Δ) => {
-	// console.log(`pathData:`, Δ.pathData);
-	// console.log(`queryData:`, Δ.queryData);
-	// console.log(`querySpec:`, Δ.querySpec);
-	return responseJson(Δ.pathData);
-});
-
-// λ.routeGet("/foo?s=[%s]", (Δ) => {
-// 	console.log(`pathData:`, Δ.pathData);
-// 	console.log(`queryData:`, Δ.queryData);
-// 	console.log(`querySpec:`, Δ.querySpec);
-// 	return responseJson(Δ.pathData);
-// });
-
-λ.routeGet("/foo/[s1:%d]/[s2:%s]", (Δ) => {
-	// console.log(`pathData:`, Δ.pathData);
-	// console.log(`queryData:`, Δ.queryData);
-	// console.log(`querySpec:`, Δ.querySpec);
-	return responseJson(Δ.pathData);
-});
-
-// λ.routeGet("/foo/[d:%d]/[s:%s]", (Δ) => {
-// 	console.log(`pathData:`, Δ.pathData);
-// 	console.log(`querySpec:`, Δ.querySpec);
-// 	return responseJson(Δ.pathData);
-// });
-
-// λ.routeGet("/foo/[d:%d]", (Δ) => {
-// 	console.log(`pathData:`, Δ.pathData);
-// 	console.log(`querySpec:`, Δ.querySpec);
-// 	return responseJson(Δ.pathData);
-// });
-
-λ.routeGet("/foo/[s:%s]", (Δ) => {
-	// console.log(`pathData:`, Δ.pathData);
-	// console.log(`queryData:`, Δ.queryData);
-	// console.log(`querySpec:`, Δ.querySpec);
-	return responseJson(Δ.pathData);
-});
+λ.route('/foo').get((Δ) => λ.response(Δ.pathData).json());
+// λ.route("/foo?s=[%s]").get((Δ) => λ.response(Δ.pathData).json());
+λ.route("/foo/[s1:%d]/[s2:%s]").get((Δ) => λ.response(Δ.pathData).json());
+λ.route("/foo/[d:%d]/[s:%s]").get((Δ) => λ.response(Δ.pathData).json());
+// λ.route("/foo/[d:%d]").get((Δ) => λ.response(Δ.pathData).json());
+λ.route("/foo/[s:%s]").get((Δ) => λ.response(Δ.pathData).json());
 
 export const handler = λ.handler;

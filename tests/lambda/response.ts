@@ -1,11 +1,11 @@
-import { create, response, responseBase64, responseHtml, responseJson, responseText } from '../../src/lambda.ts';
+import { create } from '../../src/lambda.ts';
 
 const λ = create();
 
-λ.routeGet('/basic', () => response('foo'));
-λ.routeGet('/string', () => responseText('foo'));
-λ.routeGet('/json', () => responseJson({ foo: 'bar' }));
-λ.routeGet('/base64', () => responseBase64('foo'));
-λ.routeGet('/html', () => responseHtml());
+λ.route('/basic').get(() => λ.response('foo').basic());
+λ.route('/string').get(() => λ.response('foo').text());
+λ.route('/json').get(() => λ.response({ foo: 'bar' }).json());
+λ.route('/base64').get(() => λ.response('foo').base64());
+λ.route('/html').get(() => λ.response().html());
 
 export const handler = λ.handler;

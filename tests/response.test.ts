@@ -14,6 +14,7 @@ describe("Response", () => {
     expect(result.headers).toBeUndefined();
     expect(result.body).toBe('foo');
   });
+
   it("returns string", async () => {
     const result = await simulator(handler, {
       method: "GET",

@@ -15,6 +15,16 @@ export type RouteDataType = "string" | "number" | "boolean";
 
 export type Headers = APIGatewayProxyStructuredResultV2["headers"];
 
+interface LogDefinition {
+	type: string;
+	value: any[];
+};
+
+interface ObjectDefinition {
+	path: string;
+	value: unknown;
+};
+
 interface RouteDefinition<Q = any> {
   method: HttpMethod;
   template: string;
@@ -24,130 +34,73 @@ interface RouteDefinition<Q = any> {
   handler: RouteHandler<Q>;
 }
 
-export const log = (
-	...data: any[]
-): void => {
-	console.log(...data);
+export interface LambdaResponse {
+	_code?: number;
+	_headers?: Headers;
+	/** Set HTTP status code */
+	code: (code: number) => LambdaResponse;
+	/** Returns response */
+	basic: (
+		body?: any
+	) => APIGatewayProxyStructuredResultV2;
+	/** Returns response as JSON */
+	json: () => APIGatewayProxyStructuredResultV2;
+	/** Returns response as HTML */
+	html: () => APIGatewayProxyStructuredResultV2;
+	/** Returns response as Base64 */
+	base64: () => APIGatewayProxyStructuredResultV2;
+	/** Returns response as plain text */
+	text: () => APIGatewayProxyStructuredResultV2;
 };
 
-export const logError = (
-	...data: any[]
-): void => {
-	console.error(...data);
+export interface LambdaLog {
+	/** Add custom type and data */
+	add: (type: string, ...data: any[]) => void;
+	/** Add debug entry */
+	debug: (...data: any[]) => void;
+	/** Add error entry */
+	error: (...data: any[]) => void;
+	/** Add info entry */
+	info: (...data: any[]) => void;
+	/** Add log entry */
+	log: (...data: any[]) => void;
+	/** Add warning entry */
+	warn: (...data: any[]) => void;
 };
 
-export const logWarn = (
-	...data: any[]
-): void => {
-	console.warn(...data);
+export interface LambdaObject {
+	/** Get/set value of the object */
+	value: (value?: any) => any;
 };
 
-export const logInfo = (
-	...data: any[]
-): void => {
-	console.info(...data);
+export interface LambdaRoute {
+	/** Add custom route */
+	add: <Q = any>(method: HttpMethod, template: string, handler: RouteHandler<Q>) => LambdaRoute;
+	/** Add `GET` method route */
+	get: <Q = any>(handler: RouteHandler<Q>) => LambdaRoute;
+	/** Add `HEAD` method route */
+	head: <Q = any>(handler: RouteHandler<Q>) => LambdaRoute;
+	/** Add `OPTIONS` method route */
+	options: <Q = any>(handler: RouteHandler<Q>) => LambdaRoute;
+	/** Add `PATCH` method route */
+	patch: <Q = any>(handler: RouteHandler<Q>) => LambdaRoute;
+	/** Add `POST` method route */
+	post: <Q = any>(handler: RouteHandler<Q>) => LambdaRoute;
+	/** Add `PUT` method route */
+	put: <Q = any>(handler: RouteHandler<Q>) => LambdaRoute;
 };
 
-export const logDebug = (
-	...data: any[]
-): void => {
-	// TODO: Conditional debugging
-	// console.debug(...data);
-};
-
-export const objectExists = (
-	path: string,
-): Promise<boolean> => {
-	logDebug(`objectExists`, path);
-	return new Promise((r) => {
-		setTimeout(() => r(true), 10);
-	});
-};
-
-export const objectGet = (
-	path: string,
-): Promise<any> => {
-	logDebug(`objectGet`, path);
-	return new Promise((r) => {
-		setTimeout(() => r(true), 10);
-	});
-};
-
-export const objectSet = (
-	path: string,
-	data: any,
-): Promise<any> => {
-	logDebug(`objectSet`, path, data);
-	return new Promise((r) => {
-		setTimeout(() => r(true), 10);
-	});
-};
-
-/** Returns an AWS Gateway API response with `statusCode`, `body`, and `headers` */
-export const response = (
-	body?: any,
-	code?: number,
-	headers?: Headers,
-): APIGatewayProxyStructuredResultV2 => {
-	const response: APIGatewayProxyStructuredResultV2 = {
-		statusCode: code ?? 200,
-		headers,
-		body: body === null ? undefined : body,
-	};
-	// logDebug(`Response:`, response);
-	return response;
-};
-
-/** Prepares JSON data for `response` */
-export const responseJson = (
-	body?: any,
-	code?: number,
-	headers?: Headers,
-): APIGatewayProxyStructuredResultV2 => {
-	return response(
-		JSON.stringify(body),
-		code ?? 200,
-		{ "content-type": "application/json", ...headers },
-	);
-};
-
-/** Prepares HTML data for `response` */
-export const responseHtml = (
-	body?: string,
-	code?: number,
-	headers?: Headers,
-): APIGatewayProxyStructuredResultV2 => {
-	return response(
-		body ?? '<html></html>',
-		code ?? 200,
-		{ "content-type": "text/html", ...headers },
-	);
-};
-
-/** Prepares Base64 data for `response` */
-export const responseBase64 = (
-	body?: string,
-	code?: number,
-	headers?: Headers,
-): APIGatewayProxyStructuredResultV2 => {
-	return response(
-		atob(body ?? ''),
-		code ?? 200,
-		{ "content-type": "text/plain", ...headers },
-	);
-};
-
-/** Prepares plain text data for `response` */
-export const responseText = (
-	body?: string,
-	code?: number,
-	headers?: Headers,
-): APIGatewayProxyStructuredResultV2 => {
-	return response(
-		body ?? '',
-		code ?? 200,
-		{ "content-type": "text/plain", ...headers },
-	);
+export type LambdaApp = {
+	/** Define a log */
+	log: (name?: string) => LambdaLog;
+	/** Define an object */
+	object: (name: string) => LambdaObject;
+	/** Define a response */
+	response: (value?: any) => LambdaResponse;
+	/** Define a route */
+	route: (template: string) => LambdaRoute;
+	/** The app handler to be exposed for Lambda invocation */
+	handler: APIGatewayProxyHandlerV2;
 };
 
 export interface HandlerContext {
@@ -166,8 +119,6 @@ export type RouteHandler<Q = any> = (
 ) => Promise<any> | any;
 
 const lambdaClient = new LambdaClient({}); // region picked up from env
-
-const routes: RouteDefinition[] = [];
 
 function compilePathPattern(pathTemplate: string): {
   regex: RegExp;
@@ -234,171 +185,294 @@ function parseQueryTemplate(
   return querySpec;
 }
 
-export type LambdaApp = {
-	/** Add routing for HTTP method and path template, to handler */
-	route: <Q = any>(method: HttpMethod, template: string, handler: RouteHandler<Q>) => void;
-	/** Wrapper for `route` with `GET` method */
-	routeGet: <Q = any>(template: string, handler: RouteHandler<Q>) => void;
-	/** Wrapper for `route` with `POST` method */
-	routePost: <Q = any>(template: string, handler: RouteHandler<Q>) => void;
-	/** Wrapper for `route` with `PUT` method */
-	routePut: <Q = any>(template: string, handler: RouteHandler<Q>) => void;
-	/** Wrapper for `route` with `PATCH` method */
-	routePatch: <Q = any>(template: string, handler: RouteHandler<Q>) => void;
-	/** Wrapper for `route` with `HEAD` method */
-	routeHead: <Q = any>(template: string, handler: RouteHandler<Q>) => void;
-	/** Wrapper for `route` with `OPTIONS` method */
-	routeOptions: <Q = any>(template: string, handler: RouteHandler<Q>) => void;
-	/** The app handler to be exposed for Lambda invocation */
-	handler: APIGatewayProxyHandlerV2;
-};
-
 /** Create a new Lambda app */
 export function create(): LambdaApp {
-  function route<Q>(
-    method: HttpMethod,
-    template: string,
-    handler: RouteHandler<Q>
-  ) {
-		const [pathPart, queryPart] = template.split("?");
-    const pathTemplate = pathPart || "/";
+	const logs = new Map<string, LogDefinition>();
+	const objects = new Map<string, ObjectDefinition>();
+	const routes: RouteDefinition[] = [];
+	const state = {};
 
-    const { regex: pathRegex, paramSpec: pathSpec } =
-      compilePathPattern(pathTemplate);
+	const api: LambdaApp = {
+		log: (
+			name?: string,
+		): LambdaLog => {
+			const log: LambdaLog = {
+				add: (
+					type: string,
+					...data: any[]
+				) => {
+					// TODO: Logging hooks
+					switch (type) {
+						// TODO: Conditional debugging
+						// case 'debug':
+						// 	console.debug(...data);
+						// 	break;
+						case 'error':
+							console.error(...data);
+							break;
+						case 'info':
+							console.info(...data);
+							break;
+						case 'log':
+							console.log(...data);
+							break;
+						case 'warn':
+							console.warn(...data);
+							break;
+					}
+				},
 
-    const querySpec = parseQueryTemplate(queryPart);
-
-    routes.push({
-      method,
-      template,
-      pathRegex,
-      pathSpec,
-      querySpec,
-      handler,
-    });
-  }
-
-  function routeGet<Q = any>(
-    template: string,
-    handler: RouteHandler<Q>
-  ) {
-    route<Q>("GET", template, handler);
-  }
-
-  function routePost<Q = any>(
-    template: string,
-    handler: RouteHandler<Q>
-  ) {
-    route<Q>("POST", template, handler);
-  }
-
-  function routePut<Q = any>(
-    template: string,
-    handler: RouteHandler<Q>
-  ) {
-    route<Q>("PUT", template, handler);
-  }
-
-  function routePatch<Q = any>(
-    template: string,
-    handler: RouteHandler<Q>
-  ) {
-    route<Q>("PATCH", template, handler);
-  }
-
-  function routeHead<Q = any>(
-    template: string,
-    handler: RouteHandler<Q>
-  ) {
-    route<Q>("HEAD", template, handler);
-  }
-
-  function routeOptions<Q = any>(
-    template: string,
-    handler: RouteHandler<Q>
-  ) {
-    route<Q>("OPTIONS", template, handler);
-  }
-
-  // The actual Lambda handler
-  const handler: APIGatewayProxyHandlerV2 = async (
-    event,
-    context
-  ): Promise<APIGatewayProxyStructuredResultV2> => {
-		// const [method, routePath] = event.routeKey.split(' ');
-    const method = (event.requestContext?.http?.method ||
-      "GET") as HttpMethod;
-
-    const path = event.rawPath || "/";
-
-    let matchedRoute: RouteDefinition | undefined;
-    let pathData: Record<string, string> = {};
-
-    for (const r of routes) {
-      if (r.method !== method) continue;
-
-      const m = r.pathRegex.exec(path);
-      if (m) {
-        matchedRoute = r;
-        pathData = (m.groups || {});
-        break;
-      }
-    }
-
-		logDebug(`requestContext`, event.requestContext?.http);
-		logDebug(`Method`, method);
-		logDebug(`Path`, path);
-		logDebug(`Matched route`, matchedRoute);
-
-    if (!matchedRoute) {
-			return response(
-				null,
-				404
-			);
-    }
-
-    try {
-      const ctx: HandlerContext = {
-				lambda: lambdaClient,
-				event,
-				context,
-				pathData,
-				pathSpec: matchedRoute.pathSpec,
-				queryData: event.queryStringParameters,
-				querySpec: matchedRoute.querySpec,
+				debug: (
+					...data: any[]
+				) => {
+					log.add('debug', ...data);
+				},
+				
+				error: (
+					...data: any[]
+				) => {
+					log.add('error', ...data);
+				},
+				
+				info: (
+					...data: any[]
+				) => {
+					log.add('info', ...data);
+				},
+		
+				log: (
+					...data: any[]
+				) => {
+					log.add('log', ...data);
+				},
+				
+				warn: (
+					...data: any[]
+				) => {
+					log.add('warn', ...data);
+				},
 			};
 
-      const result = await matchedRoute.handler(ctx);
+			return log;
+		},
 
-      // Normalize to an HTTP response
-      if (typeof result === "object" && result !== null && "statusCode" in result) {
-        return result; // assume user returned full APIGW response
-      }
+		object: (
+			name: string,
+		): LambdaObject => {
+			const object: LambdaObject = {
+				value: (
+					name
+				) => {
+					return '';
+				},
+			};
 
-			return response(
-				result ?? null
-			);
-    } catch (err: any) {
-      logError("Handler error", err);
+			return object;
+		},
+
+		response: (
+			body?: string,
+		): LambdaResponse => {
+			const response: LambdaResponse = {
+				code: (code: number) => {
+					response._code = code;
+					return response;
+				},
+
+				basic: (
+					_?: any,
+				) => {
+					response._code = response._code ?? 200;
+					const result: APIGatewayProxyStructuredResultV2 = {
+						statusCode: response._code,
+						headers: response._headers,
+						body: _ === undefined ? body : _,
+					};
+					// log().debug(`Response:`, result);
+					return result;
+				},
+
+				json: () => {
+					response._headers = { "content-type": "application/json", ...response._headers };
+					return response.basic(
+						JSON.stringify(body),
+					);
+				},
+
+				html: () => {
+					response._headers = { "content-type": "text/html", ...response._headers };
+					return response.basic(
+						body ?? '<html></html>',
+					);
+				},
+
+				base64: () => {
+					response._headers = { "content-type": "text/plain", ...response._headers };
+					return response.basic(
+						atob(body ?? ''),
+					);
+				},
+
+				text: () => {
+					response._headers = { "content-type": "text/plain", ...response._headers };
+					return response.basic(
+						body ?? '',
+					);
+				},
+			};
+
+			return response;
+		},
+
+		route: (
+			template: string
+		): LambdaRoute => {
+			const route: LambdaRoute = {
+				add: <Q = any>(
+					method: HttpMethod,
+					template: string,
+					handler: RouteHandler<Q>
+				) => {
+					const [pathPart, queryPart] = template.split("?");
+					const pathTemplate = pathPart || "/";
 			
-			return responseJson(
-				JSON.stringify({
-          message: "Internal Server Error",
-          error: err?.message ?? "Unknown error",
-        }),
-				500
-			);
-    }
-  };
+					const { regex: pathRegex, paramSpec: pathSpec } =
+						compilePathPattern(pathTemplate);
+			
+					const querySpec = parseQueryTemplate(queryPart);
+			
+					routes.push({
+						method,
+						template,
+						pathRegex,
+						pathSpec,
+						querySpec,
+						handler,
+					});
+					
+					routes.push({
+						method,
+						template,
+						pathRegex,
+						pathSpec,
+						querySpec,
+						handler,
+					});
 
-  return {
-		route,
-    routeGet,
-    routePost,
-		routePut,
-    routePatch,
-		routeHead,
-		routeOptions,
-    handler,
-  };
+					return route;
+				},
+	
+				get: <Q = any>(
+					handler: RouteHandler<Q>
+				) => {
+					route.add<Q>("GET", template, handler);
+					return route;
+				},
+			
+				post: <Q = any>(
+					handler: RouteHandler<Q>
+				) => {
+					route.add<Q>("POST", template, handler);
+					return route;
+				},
+			
+				put: <Q = any>(
+					handler: RouteHandler<Q>
+				) => {
+					route.add<Q>("PUT", template, handler);
+					return route;
+				},
+			
+				patch: <Q = any>(
+					handler: RouteHandler<Q>
+				) => {
+					route.add<Q>("PATCH", template, handler);
+					return route;
+				},
+			
+				head: <Q = any>(
+					handler: RouteHandler<Q>
+				) => {
+					route.add<Q>("HEAD", template, handler);
+					return route;
+				},
+			
+				options: <Q = any>(
+					handler: RouteHandler<Q>
+				) => {
+					route.add<Q>("OPTIONS", template, handler);
+					return route;
+				}
+			};
+
+			return route;
+		},
+	
+		// The actual Lambda handler
+		handler: async (
+			event,
+			context
+		): Promise<APIGatewayProxyStructuredResultV2> => {
+			// const [method, routePath] = event.routeKey.split(' ');
+			const method = (event.requestContext?.http?.method ||
+				"GET") as HttpMethod;
+	
+			const path = event.rawPath || "/";
+	
+			let matchedRoute: RouteDefinition | undefined;
+			let pathData: Record<string, string> = {};
+	
+			for (const r of routes) {
+				if (r.method !== method) continue;
+	
+				const m = r.pathRegex.exec(path);
+				if (m) {
+					matchedRoute = r;
+					pathData = (m.groups || {});
+					break;
+				}
+			}
+	
+			api.log().debug(`requestContext`, event.requestContext?.http);
+			api.log().debug(`Method`, method);
+			api.log().debug(`Path`, path);
+			api.log().debug(`Matched route`, matchedRoute);
+	
+			if (!matchedRoute) {
+				return api.response().code(404).basic();
+			}
+	
+			try {
+				const ctx: HandlerContext = {
+					lambda: lambdaClient,
+					event,
+					context,
+					pathData,
+					pathSpec: matchedRoute.pathSpec,
+					queryData: event.queryStringParameters,
+					querySpec: matchedRoute.querySpec,
+				};
+	
+				const result = await matchedRoute.handler(ctx);
+	
+				// Normalize to an HTTP response
+				if (typeof result === "object" && result !== null && "statusCode" in result) {
+					return result; // assume user returned full APIGW response
+				}
+	
+				return api.response().basic(
+					result ?? null
+				);
+			} catch (err: any) {
+				api.log().error("Handler error", err);
+				
+				return api.response({
+					message: "Internal Server Error",
+					error: err?.message ?? "Unknown error",
+				}).code(500).json();
+			}
+		}
+	};
+
+	return api;
 }
