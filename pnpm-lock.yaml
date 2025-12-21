@@ -20,10 +20,10 @@ importers:
       '@aws-sdk/client-s3':
         specifier: ^3.956.0
         version: 3.956.0
+    devDependencies:
       '@types/aws-lambda':
         specifier: ^8.10.159
         version: 8.10.159
-    devDependencies:
       '@types/node':
         specifier: ^25.0.3
         version: 25.0.3
