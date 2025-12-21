@@ -15,24 +15,27 @@ export type RouteDataType = "string" | "number" | "boolean";
 
 export type Headers = APIGatewayProxyStructuredResultV2["headers"];
 
-interface LogDefinition {
-	type: string;
-	value: any[];
-};
-
-interface ObjectDefinition {
-	path: string;
-	value: unknown;
-};
-
-interface RouteDefinition<Q = any> {
-  method: HttpMethod;
-  template: string;
-  pathRegex: RegExp;
-  pathSpec: Record<string, RouteDataType>;
-  querySpec: Record<string, RouteDataType>;
-  handler: RouteHandler<Q>;
+export interface HandlerContext {
+	lambda: LambdaClient;
+	event: APIGatewayProxyEventV2;
+	context: Context;
+	pathData: Record<string, string>;
+	pathSpec: Record<string, RouteDataType>,
+	queryData: APIGatewayProxyEventQueryStringParameters | undefined,
+	querySpec: Record<string, RouteDataType>;
 }
+
+export interface LambdaStateData {
+	kv: Record<string, any>,
+	log: Map<string, Map<string, LogDefinition[]>>,
+	object: Map<string, ObjectDefinition>,
+	route: RouteDefinition[],
+};
+
+export type RouteHandler<Q = any> = (
+  ctx: HandlerContext,
+  query?: Q,
+) => Promise<any> | any;
 
 export interface LambdaResponse {
 	_code?: number;
@@ -90,6 +93,13 @@ export interface LambdaRoute {
 	put: <Q = any>(handler: RouteHandler<Q>) => LambdaRoute;
 };
 
+export interface LambdaState {
+	/** Get state K/V */
+	get: (key: string) => any;
+	/** Set state K/V */
+	set: (key: string, value: any) => any;
+}
+
 export type LambdaApp = {
 	/** Define a log */
 	log: (name?: string) => LambdaLog;
@@ -99,28 +109,36 @@ export type LambdaApp = {
 	response: (value?: any) => LambdaResponse;
 	/** Define a route */
 	route: (template: string) => LambdaRoute;
+	/** Define a route */
+	state: (name?: string) => LambdaState;
 	/** The app handler to be exposed for Lambda invocation */
 	handler: APIGatewayProxyHandlerV2;
 };
 
-export interface HandlerContext {
-	lambda: LambdaClient;
-	event: APIGatewayProxyEventV2;
-	context: Context;
-	pathData: Record<string, string>;
-	pathSpec: Record<string, RouteDataType>,
-	queryData: APIGatewayProxyEventQueryStringParameters | undefined,
-	querySpec: Record<string, RouteDataType>;
-}
+interface LogDefinition {
+	type: string;
+	value: any[];
+};
 
-export type RouteHandler<Q = any> = (
-  ctx: HandlerContext,
-  query?: Q,
-) => Promise<any> | any;
+interface ObjectDefinition {
+	path: string;
+	value: unknown;
+};
+
+interface RouteDefinition<Q = any> {
+  method: HttpMethod;
+  template: string;
+  pathRegex: RegExp;
+  pathSpec: Record<string, RouteDataType>;
+  querySpec: Record<string, RouteDataType>;
+  handler: RouteHandler<Q>;
+}
 
 const lambdaClient = new LambdaClient({}); // region picked up from env
 
-function compilePathPattern(pathTemplate: string): {
+function compilePathPattern(
+	pathTemplate: string
+): {
   regex: RegExp;
   paramSpec: Record<string, RouteDataType>;
 } {
@@ -187,12 +205,14 @@ function parseQueryTemplate(
 
 /** Create a new Lambda app */
 export function create(): LambdaApp {
-	const logs = new Map<string, LogDefinition>();
-	const objects = new Map<string, ObjectDefinition>();
-	const routes: RouteDefinition[] = [];
-	const state = {};
+	const _state: LambdaStateData = {
+		kv: {},
+		log: new Map(new Map()),
+		object: new Map(new Map()),
+		route: [],
+	};
 
-	const api: LambdaApp = {
+	const app: LambdaApp = {
 		log: (
 			name?: string,
 		): LambdaLog => {
@@ -201,7 +221,13 @@ export function create(): LambdaApp {
 					type: string,
 					...data: any[]
 				) => {
-					// TODO: Logging hooks
+					// TODO: Implement logger?
+					// const logger = _state.log.get(name ?? 'app') ?? _state.log.set('app', []);
+					// logger.set(
+					// 	type,
+					// 	[...logger?.get(type), ]
+					// );
+
 					switch (type) {
 						// TODO: Conditional debugging
 						// case 'debug':
@@ -341,16 +367,7 @@ export function create(): LambdaApp {
 			
 					const querySpec = parseQueryTemplate(queryPart);
 			
-					routes.push({
-						method,
-						template,
-						pathRegex,
-						pathSpec,
-						querySpec,
-						handler,
-					});
-					
-					routes.push({
+					_state.route.push({
 						method,
 						template,
 						pathRegex,
@@ -407,6 +424,21 @@ export function create(): LambdaApp {
 
 			return route;
 		},
+
+		state: () => {
+			const state: LambdaState = {
+				get: (key: string) => {
+					return _state.kv[key] ?? null;
+				},
+
+				set: (key: string, value: any) => {
+					_state.kv[key] = value;
+					return state;
+				},
+			};
+
+			return state;
+		},
 	
 		// The actual Lambda handler
 		handler: async (
@@ -422,7 +454,7 @@ export function create(): LambdaApp {
 			let matchedRoute: RouteDefinition | undefined;
 			let pathData: Record<string, string> = {};
 	
-			for (const r of routes) {
+			for (const r of _state.route) {
 				if (r.method !== method) continue;
 	
 				const m = r.pathRegex.exec(path);
@@ -433,13 +465,13 @@ export function create(): LambdaApp {
 				}
 			}
 	
-			api.log().debug(`requestContext`, event.requestContext?.http);
-			api.log().debug(`Method`, method);
-			api.log().debug(`Path`, path);
-			api.log().debug(`Matched route`, matchedRoute);
+			app.log().debug(`requestContext`, event.requestContext?.http);
+			app.log().debug(`Method`, method);
+			app.log().debug(`Path`, path);
+			app.log().debug(`Matched route`, matchedRoute);
 	
 			if (!matchedRoute) {
-				return api.response().code(404).basic();
+				return app.response().code(404).basic();
 			}
 	
 			try {
@@ -454,25 +486,32 @@ export function create(): LambdaApp {
 				};
 	
 				const result = await matchedRoute.handler(ctx);
-	
+
 				// Normalize to an HTTP response
 				if (typeof result === "object" && result !== null && "statusCode" in result) {
 					return result; // assume user returned full APIGW response
 				}
 	
-				return api.response().basic(
+				return app.response().basic(
 					result ?? null
 				);
 			} catch (err: any) {
-				api.log().error("Handler error", err);
+				app.log().error("Handler error", err);
 				
-				return api.response({
+				return app.response({
 					message: "Internal Server Error",
 					error: err?.message ?? "Unknown error",
 				}).code(500).json();
+			} finally {
+				// process.on('exit', async (code) => {
+					const used = process.memoryUsage().heapUsed / 1024 / 1024;
+					console.info(`The app used approximately ${Math.round(used * 100) / 100} MB`);
+				// 	console.info(`Exit code: ${code}`);
+				// });
+				// process.exit();
 			}
 		}
 	};
 
-	return api;
+	return app;
 }
