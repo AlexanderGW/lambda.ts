@@ -1,11 +1,22 @@
 import { describe, it, expect } from "vitest";
 import { simulator } from "./simulator";
 
-import { handler } from "./lambda/objects";
+import { create } from "../src/lambda";
 
 describe("Objects", () => {
   it("returns object contents", async () => {
-    const result = await simulator(handler, {
+    const λ = create();
+    λ.route('/foo').get(async (Δ) => {
+      const fooObj = await λ.object('/foo');
+      const setObj = fooObj?.value(JSON.stringify({
+        foo: 'bar',
+      }));
+      const getObj = fooObj?.value();
+
+      return λ.response(getObj).json();
+    });
+
+    const result = await simulator(λ.handler, {
       method: "GET",
       path: "/foo"
     });

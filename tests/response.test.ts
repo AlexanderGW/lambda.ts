@@ -1,11 +1,14 @@
 import { describe, it, expect } from "vitest";
 import { simulator } from "./simulator";
 
-import { handler } from "./lambda/response";
+import { create } from "../src/lambda";
 
 describe("Response", () => {
   it("returns basic response", async () => {
-    const result = await simulator(handler, {
+    const λ = create();
+    λ.route('/basic').get(() => λ.response('foo').basic());
+
+    const result = await simulator(λ.handler, {
       method: "GET",
       path: "/basic"
     });
@@ -16,7 +19,10 @@ describe("Response", () => {
   });
 
   it("returns string", async () => {
-    const result = await simulator(handler, {
+    const λ = create();
+    λ.route('/string').get(() => λ.response('foo').text());
+
+    const result = await simulator(λ.handler, {
       method: "GET",
       path: "/string"
     });
@@ -27,7 +33,10 @@ describe("Response", () => {
   });
 
   it("returns JSON object", async () => {
-    const result = await simulator(handler, {
+    const λ = create();
+    λ.route('/json').get(() => λ.response({ foo: 'bar' }).json());
+
+    const result = await simulator(λ.handler, {
       method: "GET",
       path: "/json"
     });
@@ -40,7 +49,10 @@ describe("Response", () => {
   });
 
   it("returns HTML string", async () => {
-    const result = await simulator(handler, {
+    const λ = create();
+    λ.route('/html').get(() => λ.response().html());
+
+    const result = await simulator(λ.handler, {
       method: "GET",
       path: "/html"
     });
@@ -52,7 +64,10 @@ describe("Response", () => {
   });
 
   it("returns Base64 string", async () => {
-    const result = await simulator(handler, {
+    const λ = create();
+    λ.route('/base64').get(() => λ.response('foo').base64());
+
+    const result = await simulator(λ.handler, {
       method: "GET",
       path: "/base64"
     });

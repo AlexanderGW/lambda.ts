@@ -11,7 +11,10 @@ export interface FakeLambdaInvocation {
 /** Simulate a fake AWS API Gateway Lambda V2 invocation */
 export async function simulator(
 	handler: APIGatewayProxyHandlerV2,
-  input: FakeLambdaInvocation
+  input: FakeLambdaInvocation = {
+    method: "GET",
+    path: "/"
+  }
 ): Promise<APIGatewayProxyStructuredResultV2> {
   const {
     method = "GET",
