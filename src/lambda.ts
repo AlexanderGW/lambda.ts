@@ -9,6 +9,13 @@ import {
 	type Context
 } from 'aws-lambda';
 
+import {
+  GetObjectCommand,
+  NoSuchKey,
+  S3Client,
+  S3ServiceException,
+} from "@aws-sdk/client-s3";
+
 export type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "HEAD" | "OPTIONS";
 
 export type RouteDataType = "string" | "number" | "boolean";
@@ -26,8 +33,9 @@ export interface HandlerContext {
 }
 
 export interface LambdaStateData {
+	exec: () => APIGatewayProxyStructuredResultV2,
 	kv: Record<string, any>,
-	log: Map<string, Map<string, LogDefinition[]>>,
+	log: Map<string, LogDefinition[]>,
 	object: Map<string, ObjectDefinition>,
 	route: RouteDefinition[],
 };
@@ -72,8 +80,9 @@ export interface LambdaLog {
 };
 
 export interface LambdaObject {
-	/** Get/set value of the object */
-	value: (value?: any) => any;
+	acl: (key?: string) => boolean;
+	meta: (key?: string) => null;
+	value: (value?: string | null) => string | boolean | null;
 };
 
 export interface LambdaRoute {
@@ -101,10 +110,12 @@ export interface LambdaState {
 }
 
 export type LambdaApp = {
+	/** Define an executor (called if no routes defined) */
+	exec: (handler: () => APIGatewayProxyStructuredResultV2) => void;
 	/** Define a log */
 	log: (name?: string) => LambdaLog;
 	/** Define an object */
-	object: (name: string) => LambdaObject;
+	object: (key: string) => Promise<LambdaObject | null>;
 	/** Define a response */
 	response: (value?: any) => LambdaResponse;
 	/** Define a route */
@@ -206,13 +217,20 @@ function parseQueryTemplate(
 /** Create a new Lambda app */
 export function create(): LambdaApp {
 	const _state: LambdaStateData = {
+		exec: () => {
+			return app.response().code(404).basic();
+		},
 		kv: {},
-		log: new Map(new Map()),
-		object: new Map(new Map()),
+		log: new Map(),
+		object: new Map(),
 		route: [],
 	};
 
 	const app: LambdaApp = {
+		exec: (handler) => {
+			_state.exec = handler;
+		},
+
 		log: (
 			name?: string,
 		): LambdaLog => {
@@ -282,14 +300,54 @@ export function create(): LambdaApp {
 			return log;
 		},
 
-		object: (
-			name: string,
-		): LambdaObject => {
+		object: async (
+			key: string,
+		): Promise<LambdaObject> => {
+			const client = new S3Client({});
+
+			const bucketName = 'foobar';
+
+			try {
+				const response = await client.send(
+					new GetObjectCommand({
+						Bucket: bucketName,
+						Key: key,
+					}),
+				);
+				// The Body object also has 'transformToByteArray' and 'transformToWebStream' methods.
+				const str = await response.Body?.transformToString();
+				
+				app.log().info(str);
+
+			} catch (caught) {
+				if (caught instanceof NoSuchKey) {
+					app.log().error(
+						`Error from S3 while getting object "${key}" from "${bucketName}". No such key exists.`,
+					);
+				} else if (caught instanceof S3ServiceException) {
+					app.log().error(
+						`Error from S3 while getting object from ${bucketName}.  ${caught.name}: ${caught.message}`,
+					);
+				} else {
+					throw caught;
+				}
+			}
+
 			const object: LambdaObject = {
-				value: (
-					name
+				acl: (
+					key?
 				) => {
-					return '';
+					return true;
+				},
+				meta: (
+					key?
+				) => {
+					return null;
+				},
+				value: (
+					value?
+				) => {
+					return true;
 				},
 			};
 
@@ -445,36 +503,43 @@ export function create(): LambdaApp {
 			event,
 			context
 		): Promise<APIGatewayProxyStructuredResultV2> => {
-			// const [method, routePath] = event.routeKey.split(' ');
-			const method = (event.requestContext?.http?.method ||
-				"GET") as HttpMethod;
-	
-			const path = event.rawPath || "/";
-	
-			let matchedRoute: RouteDefinition | undefined;
-			let pathData: Record<string, string> = {};
-	
-			for (const r of _state.route) {
-				if (r.method !== method) continue;
-	
-				const m = r.pathRegex.exec(path);
-				if (m) {
-					matchedRoute = r;
-					pathData = (m.groups || {});
-					break;
-				}
-			}
-	
-			app.log().debug(`requestContext`, event.requestContext?.http);
-			app.log().debug(`Method`, method);
-			app.log().debug(`Path`, path);
-			app.log().debug(`Matched route`, matchedRoute);
-	
-			if (!matchedRoute) {
-				return app.response().code(404).basic();
-			}
-	
 			try {
+				// const [method, routePath] = event.routeKey.split(' ');
+				const method = (event.requestContext?.http?.method ||
+					"GET") as HttpMethod;
+		
+				const path = event.rawPath || "/";
+		
+				let matchedRoute: RouteDefinition | undefined;
+				let pathData: Record<string, string> = {};
+
+				// No routes defined, attempt executor
+				if (!_state.route.length && _state.exec) {
+					return _state.exec();
+				}
+
+				// Process routes
+				for (const r of _state.route) {
+					if (r.method !== method) continue;
+		
+					const m = r.pathRegex.exec(path);
+					if (m) {
+						matchedRoute = r;
+						pathData = (m.groups || {});
+						break;
+					}
+				}
+		
+				app.log().debug(`event.requestContext`, event.requestContext);
+				app.log().debug(`method`, method);
+				app.log().debug(`path`, path);
+				app.log().debug(`matchedRoute`, matchedRoute);
+		
+				// No routes matched
+				if (!matchedRoute) {
+					return app.response().code(404).basic();
+				}
+				
 				const ctx: HandlerContext = {
 					lambda: lambdaClient,
 					event,
