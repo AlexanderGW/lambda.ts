@@ -558,48 +558,30 @@ export function create(): LambdaApp {
 
 					return route;
 				},
-	
+
 				get: <Q = any>(
 					handler: RouteHandler<Q>
-				) => {
-					route.add<Q>("GET", template, handler);
-					return route;
-				},
+				) => route.add<Q>("GET", template, handler),
 			
 				post: <Q = any>(
 					handler: RouteHandler<Q>
-				) => {
-					route.add<Q>("POST", template, handler);
-					return route;
-				},
+				) => route.add<Q>("POST", template, handler),
 			
 				put: <Q = any>(
 					handler: RouteHandler<Q>
-				) => {
-					route.add<Q>("PUT", template, handler);
-					return route;
-				},
+				) => route.add<Q>("PUT", template, handler),
 			
 				patch: <Q = any>(
 					handler: RouteHandler<Q>
-				) => {
-					route.add<Q>("PATCH", template, handler);
-					return route;
-				},
+				) => route.add<Q>("PATCH", template, handler),
 			
 				head: <Q = any>(
 					handler: RouteHandler<Q>
-				) => {
-					route.add<Q>("HEAD", template, handler);
-					return route;
-				},
+				) => route.add<Q>("HEAD", template, handler),
 			
 				options: <Q = any>(
 					handler: RouteHandler<Q>
-				) => {
-					route.add<Q>("OPTIONS", template, handler);
-					return route;
-				}
+				) => route.add<Q>("OPTIONS", template, handler)
 			};
 
 			return route;
