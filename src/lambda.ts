@@ -654,7 +654,12 @@ export function create(): LambdaApp {
 			context
 		): Promise<APIGatewayProxyStructuredResultV2> => {
 			try {
-				// const [method, routePath] = event.routeKey.split(' ');
+
+				// No routes defined, attempt executor
+				if (!_state.route.length && _state.exec) {
+					return _state.exec();
+				}
+
 				const method = (event.requestContext?.http?.method ||
 					"GET") as HttpMethod;
 		
@@ -662,11 +667,6 @@ export function create(): LambdaApp {
 		
 				let matchedRoute: RouteDefinition | undefined;
 				let pathData: Record<string, string> = {};
-
-				// No routes defined, attempt executor
-				if (!_state.route.length && _state.exec) {
-					return _state.exec();
-				}
 
 				// Process routes
 				for (const r of _state.route) {
