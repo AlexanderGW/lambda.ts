@@ -11,7 +11,7 @@ describe("Key/value state", () => {
       const setKv = kvFoo.value('bar');
       // expect(setKv).toBeInstanceOf(LambdaState);
 
-      const getKv = kvFoo.value();
+      const getKv = await kvFoo.value();
       expect(getKv).toBe('bar');
 
       return λ.response().basic();

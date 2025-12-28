@@ -8,7 +8,6 @@ import {
 	type APIGatewayProxyStructuredResultV2,
 	type Context
 } from 'aws-lambda';
-
 import {
   GetObjectCommand,
 	PutObjectCommand,
@@ -17,6 +16,8 @@ import {
   S3ServiceException,
 	paginateListObjectsV2,
 } from "@aws-sdk/client-s3";
+import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
+import { DynamoDBDocumentClient, GetCommand, PutCommand } from "@aws-sdk/lib-dynamodb";
 
 export type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "HEAD" | "OPTIONS";
 
@@ -34,7 +35,7 @@ export interface HandlerContext {
 	querySpec: Record<string, RouteDataType>;
 }
 
-export interface LambdaStateData {
+export interface LambdaState {
 	exec: () => Promise<APIGatewayProxyStructuredResultV2>,
 	kv: Record<string, any>,
 	log: Map<string, LogDefinition[]>,
@@ -104,9 +105,16 @@ export interface LambdaRoute {
 	put: <Q = any>(handler: RouteHandler<Q>) => LambdaRoute;
 };
 
-export interface LambdaState {
+export interface LambdaKeyValueConfig {
+	/** Persist the state */
+	persist?: false,
+	/** Name of the table, if persisted (if applicable) */
+	table?: string,
+};
+
+export interface LambdaKeyValue {
 	/** Get/set key's value  */
-	value: (value?: any) => any;
+	value: (value?: any) => Promise<any>;
 }
 
 export type LambdaApp = {
@@ -129,7 +137,7 @@ export type LambdaApp = {
 	/** Define a route */
 	route: (template: string) => LambdaRoute;
 	/** Define a key/value pair */
-	key: (key: string) => LambdaState;
+	key: (key: string, config?: LambdaKeyValueConfig) => LambdaKeyValue;
 	/** The app handler to be exposed for Lambda invocation */
 	handler: APIGatewayProxyHandlerV2;
 };
@@ -224,7 +232,7 @@ function parseQueryTemplate(
 
 /** Create a new Lambda app */
 export function create(): LambdaApp {
-	const _state: LambdaStateData = {
+	const _state: LambdaState = {
 		exec: async () => {
 			// Default 404 response
 			return app.response().code(404).basic();
@@ -587,21 +595,60 @@ export function create(): LambdaApp {
 			return route;
 		},
 
-		key: (key) => {
-			const state: LambdaState = {
-				value: (value?: any) => {
-					if (value === undefined) {
-						return _state.kv[key] ?? null;
-					}
-					_state.kv[key] = value;
-					return state;
+		key: (key, config) => {
+			if (config?.persist && !config.table?.length)
+				throw new Error(`key(${key}): Table required for persistence`);
+
+			const get = async () => {
+				if (config?.persist) {
+					const client = new DynamoDBClient({});
+					const docClient = DynamoDBDocumentClient.from(client);
+
+					const command = new GetCommand({
+						TableName: config?.table,
+						Key: {
+							[key]: key,
+						},
+					});
+
+					const response = await docClient.send(command);
+					app.log().debug(response);
+				}
+
+				return _state.kv[key] ?? null;
+			};
+
+			const set = async (value: any) => {
+				if (config?.persist) {
+					const client = new DynamoDBClient({});
+					const docClient = DynamoDBDocumentClient.from(client);
+
+					const command = new PutCommand({
+						TableName: config?.table,
+						Item: {
+							[key]: value,
+						},
+					});
+				
+					const response = await docClient.send(command);
+					app.log().debug(response);
+				}
+
+				_state.kv[key] = value;
+
+				return true;
+			};
+
+			const kv: LambdaKeyValue = {
+				value: async (value?: any) => {
+					if (value === undefined) return await get();
+					return await set(value);
 				},
 			};
 
-			return state;
+			return kv;
 		},
 	
-		// The actual Lambda handler
 		handler: async (
 			event,
 			context
