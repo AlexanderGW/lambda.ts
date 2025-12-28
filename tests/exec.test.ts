@@ -14,7 +14,7 @@ describe("Executor", () => {
 
   it("returns defined content, when no routes defined", async () => {
     const λ = create();
-    λ.exec(() => λ.response('foo').basic());
+    λ.exec(async () => λ.response('foo').basic());
     const result = await simulator(λ.handler);
 
     expect(result.statusCode).toBe(200);

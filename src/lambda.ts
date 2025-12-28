@@ -11,9 +11,11 @@ import {
 
 import {
   GetObjectCommand,
+	PutObjectCommand,
   NoSuchKey,
   S3Client,
   S3ServiceException,
+	paginateListObjectsV2,
 } from "@aws-sdk/client-s3";
 
 export type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "HEAD" | "OPTIONS";
@@ -33,7 +35,7 @@ export interface HandlerContext {
 }
 
 export interface LambdaStateData {
-	exec: () => APIGatewayProxyStructuredResultV2,
+	exec: () => Promise<APIGatewayProxyStructuredResultV2>,
 	kv: Record<string, any>,
 	log: Map<string, LogDefinition[]>,
 	object: Map<string, ObjectDefinition>,
@@ -82,7 +84,7 @@ export interface LambdaLog {
 export interface LambdaObject {
 	acl: (key?: string) => boolean;
 	meta: (key?: string) => null;
-	value: (value?: string | null) => string | boolean | null;
+	value: (value?: string | null) => Promise<string | boolean | null>;
 };
 
 export interface LambdaRoute {
@@ -103,25 +105,31 @@ export interface LambdaRoute {
 };
 
 export interface LambdaState {
-	/** Get state K/V */
-	get: (key: string) => any;
-	/** Set state K/V */
-	set: (key: string, value: any) => any;
+	/** Get/set key's value  */
+	value: (value?: any) => any;
 }
 
 export type LambdaApp = {
 	/** Define an executor (called if no routes defined) */
-	exec: (handler: () => APIGatewayProxyStructuredResultV2) => void;
+	exec: (handler: () => Promise<APIGatewayProxyStructuredResultV2>) => Promise<void>;
 	/** Define a log */
 	log: (name?: string) => LambdaLog;
 	/** Define an object */
-	object: (key: string) => Promise<LambdaObject | null>;
+	object: (
+		key: string,
+		bucket?: string
+	) => Promise<LambdaObject | null>;
+	/** Define multiple objects */
+	objects: (
+		key: string,
+		bucket?: string
+	) => Promise<LambdaObject[] | null>;
 	/** Define a response */
 	response: (value?: any) => LambdaResponse;
 	/** Define a route */
 	route: (template: string) => LambdaRoute;
-	/** Define a route */
-	state: (name?: string) => LambdaState;
+	/** Define a key/value pair */
+	key: (key: string) => LambdaState;
 	/** The app handler to be exposed for Lambda invocation */
 	handler: APIGatewayProxyHandlerV2;
 };
@@ -217,7 +225,8 @@ function parseQueryTemplate(
 /** Create a new Lambda app */
 export function create(): LambdaApp {
 	const _state: LambdaStateData = {
-		exec: () => {
+		exec: async () => {
+			// Default 404 response
 			return app.response().code(404).basic();
 		},
 		kv: {},
@@ -227,7 +236,7 @@ export function create(): LambdaApp {
 	};
 
 	const app: LambdaApp = {
-		exec: (handler) => {
+		exec: async (handler) => {
 			_state.exec = handler;
 		},
 
@@ -302,15 +311,14 @@ export function create(): LambdaApp {
 
 		object: async (
 			key: string,
-		): Promise<LambdaObject> => {
+			bucket?: string,
+		): Promise<LambdaObject | null> => {
 			const client = new S3Client({});
-
-			const bucketName = 'foobar';
 
 			try {
 				const response = await client.send(
 					new GetObjectCommand({
-						Bucket: bucketName,
+						Bucket: bucket,
 						Key: key,
 					}),
 				);
@@ -318,15 +326,14 @@ export function create(): LambdaApp {
 				const str = await response.Body?.transformToString();
 				
 				app.log().info(str);
-
 			} catch (caught) {
 				if (caught instanceof NoSuchKey) {
 					app.log().error(
-						`Error from S3 while getting object "${key}" from "${bucketName}". No such key exists.`,
+						`Error from S3 while getting object "${key}" from "${bucket}". No such key exists.`,
 					);
 				} else if (caught instanceof S3ServiceException) {
 					app.log().error(
-						`Error from S3 while getting object from ${bucketName}.  ${caught.name}: ${caught.message}`,
+						`Error from S3 while getting object from ${bucket}. ${caught.name}: ${caught.message}`,
 					);
 				} else {
 					throw caught;
@@ -344,14 +351,129 @@ export function create(): LambdaApp {
 				) => {
 					return null;
 				},
-				value: (
-					value?
+				value: async (
+					value
 				) => {
-					return true;
+					app.log().debug(`objects('${key}')`);
+					if (!key) return null;
+
+					// Get value
+					if (value === undefined) {
+						const response = await client.send(
+							new GetObjectCommand({
+								Bucket: bucket,
+								Key: key,
+							}),
+						);
+						app.log().debug(`objects('${key}').getValue().response`, response);
+
+						const getValue = await response.Body?.transformToString('utf-8');
+						if (!getValue) return null;
+
+						return getValue;
+					}
+
+					// Put value
+					const response = await client.send(
+						new PutObjectCommand({
+							Bucket: bucket,
+							Key: key,
+							Body: value ?? '',
+							ContentType: 'text/plain',
+						}),
+					);
+					app.log().debug(`objects('${key}').putValue().response`, response);
+
+					return response.$metadata.httpStatusCode === 200;
 				},
 			};
 
 			return object;
+		},
+
+		objects: async (
+			key: string,
+			bucket?: string,
+			pageSize: number = 10,
+		): Promise<LambdaObject[] | null> => {
+			const result: LambdaObject[] = [];
+
+			try {
+				const client = new S3Client({});
+
+				const paginator = paginateListObjectsV2(
+					{ client, /* Max items per page */ pageSize },
+					{ Bucket: bucket },
+				);
+		
+				for await (const page of paginator) {
+					if (!page.Contents || page.Contents.length === 0) continue;
+
+					page.Contents.forEach((o) => {
+						result.push({
+							acl: (
+								key?
+							) => {
+								return true;
+							},
+							meta: (
+								key?
+							) => {
+								return null;
+							},
+							value: async (
+								value
+							) => {
+								app.log().debug(`objects('${o.Key}')`);
+								if (!o?.Key) return null;
+	
+								// Get value
+								if (value === undefined) {
+									const response = await client.send(
+										new GetObjectCommand({
+											Bucket: bucket,
+											Key: o.Key,
+										}),
+									);
+									app.log().debug(`objects('${key}').getValue().response`, response);
+
+									const getValue = await response.Body?.transformToString('utf-8');
+									if (!getValue) return null;
+
+									return getValue;
+								}
+
+								// Put value
+								const response = await client.send(
+									new PutObjectCommand({
+										Bucket: bucket,
+										Key: o.Key,
+										Body: value ?? '',
+										ContentType: 'text/plain',
+									}),
+								);
+								app.log().debug(`objects('${key}').putValue().response`, response);
+
+								return response.$metadata.httpStatusCode === 200;
+							},
+						});
+					});
+				}
+			} catch (caught) {
+				if (caught instanceof NoSuchKey) {
+					app.log().error(
+						`Error from S3 while getting object "${key}". No such key exists.`,
+					);
+				} else if (caught instanceof S3ServiceException) {
+					app.log().error(
+						`Error from S3 while getting object. ${caught.name}: ${caught.message}`,
+					);
+				} else {
+					throw caught;
+				}
+			} finally {
+				return result;
+			}
 		},
 
 		response: (
@@ -483,13 +605,12 @@ export function create(): LambdaApp {
 			return route;
 		},
 
-		state: () => {
+		key: (key) => {
 			const state: LambdaState = {
-				get: (key: string) => {
-					return _state.kv[key] ?? null;
-				},
-
-				set: (key: string, value: any) => {
+				value: (value?: any) => {
+					if (value === undefined) {
+						return _state.kv[key] ?? null;
+					}
 					_state.kv[key] = value;
 					return state;
 				},
