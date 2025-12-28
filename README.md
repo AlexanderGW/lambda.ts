@@ -38,7 +38,7 @@ const λ = create();
 export const handler = λ.handler;
 ```
 
-...will provide NoSQL DynamoDB support
+...will provide key/value storage, with option to `persist` via DynamoDB
 
 ```typescript
 import { create } from 'lambda.ts';
@@ -47,9 +47,8 @@ import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 const λ = create();
 λ.route('/').get(async () => {
 	try {
-		const client = new DynamoDBClient({ region: "REGION" });
-		const result = await client.send(command);
-		return λ.response(result).json();
+		const foo = await λ.key('foo', { persist: true, table: 'bar' });
+		return λ.response(foo.value()).json();
 	} catch (error) {
 		return λ.response('Oops!').code(500).text();
 	}
