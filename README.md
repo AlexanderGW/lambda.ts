@@ -48,7 +48,7 @@ const λ = create();
 λ.route('/').get(async () => {
 	try {
 		const foo = await λ.key('foo', { persist: true, table: 'bar' });
-		return λ.response(foo.value()).json();
+		return λ.response(await foo.value()).json();
 	} catch (error) {
 		return λ.response('Oops!').code(500).text();
 	}
