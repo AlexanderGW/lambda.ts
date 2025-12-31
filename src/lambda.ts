@@ -2,7 +2,6 @@ import {
   LambdaClient,
 } from "@aws-sdk/client-lambda";
 import {
-	type APIGatewayProxyEventQueryStringParameters,
 	type APIGatewayProxyEventV2,
 	type APIGatewayProxyHandlerV2,
 	type APIGatewayProxyStructuredResultV2,
@@ -31,7 +30,6 @@ export interface HandlerContext {
 	context: Context;
 	pathData: Record<string, string>;
 	pathSpec: Record<string, RouteDataType>,
-	queryData: APIGatewayProxyEventQueryStringParameters | undefined,
 	querySpec: Record<string, RouteDataType>;
 }
 
@@ -172,6 +170,11 @@ function compilePathPattern(
   const segments = pathTemplate.split("/").filter(Boolean);
   let pattern = "^"; // match entire string
   const paramSpec: Record<string, RouteDataType> = {};
+
+	// Default absolute "/"
+	if (!segments.length) {
+		pattern += "/";
+	}
 
   for (const segment of segments) {
     pattern += "/";
@@ -665,7 +668,7 @@ export function create(): LambdaApp {
 		
 				const path = event.rawPath || "/";
 		
-				let matchedRoute: RouteDefinition | undefined;
+				let matchedRoute: RouteDefinition | null = null;
 				let pathData: Record<string, string> = {};
 
 				// Process routes
@@ -696,7 +699,6 @@ export function create(): LambdaApp {
 					context,
 					pathData,
 					pathSpec: matchedRoute.pathSpec,
-					queryData: event.queryStringParameters,
 					querySpec: matchedRoute.querySpec,
 				};
 	
