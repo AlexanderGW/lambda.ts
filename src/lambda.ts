@@ -1,11 +1,11 @@
 import {
   LambdaClient,
 } from "@aws-sdk/client-lambda";
-import {
-	type APIGatewayProxyEventV2,
-	type APIGatewayProxyHandlerV2,
-	type APIGatewayProxyStructuredResultV2,
-	type Context
+import type {
+	APIGatewayProxyEventV2,
+	APIGatewayProxyHandlerV2,
+	APIGatewayProxyStructuredResultV2,
+	Context
 } from 'aws-lambda';
 import {
   GetObjectCommand,
@@ -24,6 +24,36 @@ export type RouteDataType = "string" | "number" | "boolean";
 
 export type Headers = APIGatewayProxyStructuredResultV2["headers"];
 
+export type Middleware = (
+	ctx: HandlerContext,
+	next: () => Promise<APIGatewayProxyStructuredResultV2>
+) => Promise<APIGatewayProxyStructuredResultV2> | APIGatewayProxyStructuredResultV2;
+
+export type CorsOrigin =
+	| string
+	| string[]
+	| ((origin: string) => boolean);
+
+export interface CorsOptions {
+	/** Allowed origin(s). Defaults to `"*"` when CORS is enabled. */
+	origin?: CorsOrigin;
+	/** Allowed methods. Derived from registered routes when omitted. */
+	methods?: HttpMethod[] | string;
+	/** Allowed request headers. Reflects the preflight request when omitted. */
+	headers?: string[] | string;
+	/** Whether credentials (cookies) are allowed. */
+	credentials?: boolean;
+	/** How long preflight results can be cached, in seconds. */
+	maxAge?: number;
+	/** Headers the browser may expose to JS. */
+	expose?: string[] | string;
+}
+
+export interface CreateOptions {
+	/** Enable CORS middleware (`true` means `origin: "*"`). */
+	cors?: true | CorsOptions;
+}
+
 export interface HandlerContext {
 	lambda: LambdaClient;
 	event: APIGatewayProxyEventV2;
@@ -39,6 +69,7 @@ export interface LambdaState {
 	log: Map<string, LogDefinition[]>,
 	object: Map<string, ObjectDefinition>,
 	route: RouteDefinition[],
+	middleware: Middleware[],
 };
 
 export type RouteHandler<Q = any> = (
@@ -51,6 +82,8 @@ export interface LambdaResponse {
 	_headers?: Headers;
 	/** Set HTTP status code */
 	code: (code: number) => LambdaResponse;
+	/** Merge response headers */
+	headers: (headers: Record<string, string>) => LambdaResponse;
 	/** Returns response */
 	basic: (
 		body?: any
@@ -101,6 +134,8 @@ export interface LambdaRoute {
 	post: <Q = any>(handler: RouteHandler<Q>) => LambdaRoute;
 	/** Add `PUT` method route */
 	put: <Q = any>(handler: RouteHandler<Q>) => LambdaRoute;
+	/** Add `DELETE` method route */
+	delete: <Q = any>(handler: RouteHandler<Q>) => LambdaRoute;
 };
 
 export interface LambdaKeyValueConfig {
@@ -116,6 +151,8 @@ export interface LambdaKeyValue {
 }
 
 export type LambdaApp = {
+	/** Register middleware that wraps the Lambda handler */
+	use: (mw: Middleware) => LambdaApp;
 	/** Define an executor (called if no routes defined) */
 	exec: (handler: () => Promise<APIGatewayProxyStructuredResultV2>) => Promise<void>;
 	/** Define a log */
@@ -230,11 +267,178 @@ function parseQueryTemplate(
     querySpec[key] = type;
   }
 
-  return querySpec;
+	return querySpec;
+}
+
+const DEFAULT_CORS_METHODS: HttpMethod[] = [
+	"GET",
+	"POST",
+	"PUT",
+	"PATCH",
+	"DELETE",
+	"HEAD",
+	"OPTIONS",
+];
+
+function getHeader(
+	headers: APIGatewayProxyEventV2["headers"] | Headers,
+	name: string,
+): string | undefined {
+	if (!headers) return undefined;
+	const lower = name.toLowerCase();
+	for (const [key, value] of Object.entries(headers)) {
+		if (key.toLowerCase() === lower && value !== undefined) {
+			return String(value);
+		}
+	}
+	return undefined;
+}
+
+function headerList(value: string[] | string | undefined): string | undefined {
+	if (value === undefined) return undefined;
+	return Array.isArray(value) ? value.join(", ") : value;
+}
+
+function mergeHeaders(
+	result: APIGatewayProxyStructuredResultV2,
+	extra: Record<string, string>,
+): APIGatewayProxyStructuredResultV2 {
+	return {
+		...result,
+		headers: {
+			...result.headers,
+			...extra,
+		},
+	};
+}
+
+function compose(
+	middleware: Middleware[],
+	core: (ctx: HandlerContext) => Promise<APIGatewayProxyStructuredResultV2>,
+): (ctx: HandlerContext) => Promise<APIGatewayProxyStructuredResultV2> {
+	return (ctx) => {
+		let index = -1;
+		const dispatch = (i: number): Promise<APIGatewayProxyStructuredResultV2> => {
+			if (i <= index) {
+				return Promise.reject(new Error("next() called multiple times"));
+			}
+			index = i;
+			if (i === middleware.length) {
+				return Promise.resolve(core(ctx));
+			}
+			return Promise.resolve(middleware[i](ctx, () => dispatch(i + 1)));
+		};
+		return dispatch(0);
+	};
+}
+
+function resolveCorsOrigin(
+	originOpt: CorsOrigin | undefined,
+	requestOrigin: string | undefined,
+	credentials?: boolean,
+): string | undefined {
+	const configured = originOpt ?? "*";
+
+	if (typeof configured === "function") {
+		if (!requestOrigin || !configured(requestOrigin)) return undefined;
+		return requestOrigin;
+	}
+
+	if (Array.isArray(configured)) {
+		if (!requestOrigin || !configured.includes(requestOrigin)) return undefined;
+		return requestOrigin;
+	}
+
+	if (configured === "*") {
+		if (credentials) return requestOrigin;
+		return "*";
+	}
+
+	return configured;
+}
+
+function allowedMethodsFromRoutes(
+	routes: RouteDefinition[],
+	override?: HttpMethod[] | string,
+): string {
+	if (override) return headerList(override)!;
+	const methods = [...new Set(routes.map((r) => r.method))];
+	if (!methods.includes("OPTIONS")) methods.push("OPTIONS");
+	if (methods.length === 1 && methods[0] === "OPTIONS") {
+		return DEFAULT_CORS_METHODS.join(", ");
+	}
+	return methods.join(", ");
+}
+
+function createCorsMiddleware(
+	options: CorsOptions = {},
+	getMethods?: () => string,
+): Middleware {
+	return async (ctx, next) => {
+		const method = (ctx.event.requestContext?.http?.method || "GET") as HttpMethod;
+		const requestOrigin = getHeader(ctx.event.headers, "origin");
+		const allowOrigin = resolveCorsOrigin(
+			options.origin,
+			requestOrigin,
+			options.credentials,
+		);
+
+		const corsHeaders: Record<string, string> = {};
+
+		if (allowOrigin) {
+			corsHeaders["access-control-allow-origin"] = allowOrigin;
+			if (allowOrigin !== "*") {
+				corsHeaders["vary"] = "Origin";
+			}
+		}
+
+		const allowMethods = options.methods
+			? headerList(options.methods)
+			: getMethods?.() ?? DEFAULT_CORS_METHODS.join(", ");
+		if (allowMethods) {
+			corsHeaders["access-control-allow-methods"] = allowMethods;
+		}
+
+		const requestHeaders = getHeader(ctx.event.headers, "access-control-request-headers");
+		const allowHeaders = headerList(options.headers)
+			?? requestHeaders
+			?? (options.credentials ? requestHeaders : "*");
+		if (allowHeaders) {
+			corsHeaders["access-control-allow-headers"] = allowHeaders;
+		}
+
+		if (options.credentials) {
+			corsHeaders["access-control-allow-credentials"] = "true";
+		}
+
+		if (options.maxAge !== undefined) {
+			corsHeaders["access-control-max-age"] = String(options.maxAge);
+		}
+
+		const expose = headerList(options.expose);
+		if (expose) {
+			corsHeaders["access-control-expose-headers"] = expose;
+		}
+
+		if (method === "OPTIONS") {
+			return {
+				statusCode: 204,
+				headers: corsHeaders,
+			};
+		}
+
+		const result = await next();
+		return mergeHeaders(result, corsHeaders);
+	};
+}
+
+/** CORS middleware for API Gateway HTTP API v2 proxy responses */
+export function cors(options: CorsOptions = {}): Middleware {
+	return createCorsMiddleware(options);
 }
 
 /** Create a new Lambda app */
-export function create(): LambdaApp {
+export function create(options?: CreateOptions): LambdaApp {
 	const _state: LambdaState = {
 		exec: async () => {
 			// Default 404 response
@@ -244,9 +448,15 @@ export function create(): LambdaApp {
 		log: new Map(),
 		object: new Map(),
 		route: [],
+		middleware: [],
 	};
 
 	const app: LambdaApp = {
+		use: (mw) => {
+			_state.middleware.push(mw);
+			return app;
+		},
+
 		exec: async (handler) => {
 			_state.exec = handler;
 		},
@@ -496,6 +706,11 @@ export function create(): LambdaApp {
 					return response;
 				},
 
+				headers: (headers) => {
+					response._headers = { ...response._headers, ...headers };
+					return response;
+				},
+
 				basic: (
 					_?: any,
 				) => {
@@ -592,7 +807,11 @@ export function create(): LambdaApp {
 			
 				options: <Q = any>(
 					handler: RouteHandler<Q>
-				) => route.add<Q>("OPTIONS", template, handler)
+				) => route.add<Q>("OPTIONS", template, handler),
+
+				delete: <Q = any>(
+					handler: RouteHandler<Q>
+				) => route.add<Q>("DELETE", template, handler)
 			};
 
 			return route;
@@ -656,65 +875,80 @@ export function create(): LambdaApp {
 			event,
 			context
 		): Promise<APIGatewayProxyStructuredResultV2> => {
-			try {
+			const ctx: HandlerContext = {
+				lambda: lambdaClient,
+				event,
+				context,
+				pathData: {},
+				pathSpec: {},
+				querySpec: {},
+			};
 
-				// No routes defined, attempt executor
-				if (!_state.route.length && _state.exec) {
-					return _state.exec();
-				}
-
-				const method = (event.requestContext?.http?.method ||
-					"GET") as HttpMethod;
-		
-				const path = event.rawPath || "/";
-		
-				let matchedRoute: RouteDefinition | null = null;
-				let pathData: Record<string, string> = {};
-
-				// Process routes
-				for (const r of _state.route) {
-					if (r.method !== method) continue;
-		
-					const m = r.pathRegex.exec(path);
-					if (m) {
-						matchedRoute = r;
-						pathData = (m.groups || {});
-						break;
+			const core = async (
+				ctx: HandlerContext
+			): Promise<APIGatewayProxyStructuredResultV2> => {
+				try {
+					// No routes defined, attempt executor
+					if (!_state.route.length && _state.exec) {
+						return _state.exec();
 					}
-				}
-		
-				app.log().debug(`event.requestContext`, event.requestContext);
-				app.log().debug(`method`, method);
-				app.log().debug(`path`, path);
-				app.log().debug(`matchedRoute`, matchedRoute);
-		
-				// No routes matched
-				if (!matchedRoute) {
-					return app.response().code(404).basic();
-				}
-				
-				const ctx: HandlerContext = {
-					lambda: lambdaClient,
-					event,
-					context,
-					pathData,
-					pathSpec: matchedRoute.pathSpec,
-					querySpec: matchedRoute.querySpec,
-				};
-	
-				const result = await matchedRoute.handler(ctx);
 
-				// Normalize to an HTTP response
-				if (typeof result === "object" && result !== null && "statusCode" in result) {
-					return result; // assume user returned full APIGW response
+					const method = (event.requestContext?.http?.method ||
+						"GET") as HttpMethod;
+
+					const path = event.rawPath || "/";
+
+					let matchedRoute: RouteDefinition | null = null;
+
+					// Process routes
+					for (const r of _state.route) {
+						if (r.method !== method) continue;
+
+						const m = r.pathRegex.exec(path);
+						if (m) {
+							matchedRoute = r;
+							ctx.pathData = (m.groups || {});
+							ctx.pathSpec = r.pathSpec;
+							ctx.querySpec = r.querySpec;
+							break;
+						}
+					}
+
+					app.log().debug(`event.requestContext`, event.requestContext);
+					app.log().debug(`method`, method);
+					app.log().debug(`path`, path);
+					app.log().debug(`matchedRoute`, matchedRoute);
+
+					// No routes matched
+					if (!matchedRoute) {
+						return app.response().code(404).basic();
+					}
+
+					const result = await matchedRoute.handler(ctx);
+
+					// Normalize to an HTTP response
+					if (typeof result === "object" && result !== null && "statusCode" in result) {
+						return result; // assume user returned full APIGW response
+					}
+
+					return app.response().basic(
+						result ?? null
+					);
+				} catch (err: any) {
+					app.log().error("Handler error", err);
+
+					return app.response({
+						message: "Internal Server Error",
+						error: err?.message ?? "Unknown error",
+					}).code(500).json();
 				}
-	
-				return app.response().basic(
-					result ?? null
-				);
+			};
+
+			try {
+				return await compose(_state.middleware, core)(ctx);
 			} catch (err: any) {
 				app.log().error("Handler error", err);
-				
+
 				return app.response({
 					message: "Internal Server Error",
 					error: err?.message ?? "Unknown error",
@@ -729,6 +963,13 @@ export function create(): LambdaApp {
 			}
 		}
 	};
+
+	if (options?.cors) {
+		const corsOpts = options.cors === true ? {} : options.cors;
+		app.use(createCorsMiddleware(corsOpts, () =>
+			allowedMethodsFromRoutes(_state.route, corsOpts.methods)
+		));
+	}
 
 	return app;
 }

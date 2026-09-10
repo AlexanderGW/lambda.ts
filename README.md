@@ -22,6 +22,42 @@ const λ = create();
 export const handler = λ.handler;
 ```
 
+Provides first-class HTTP verb helpers on routes; GET/POST/PUT/PATCH/DELETE:
+
+```typescript
+λ.route('/product/[s:%s]').delete((Δ) => {
+	return λ.response().code(204).basic();
+});
+```
+
+Middleware wraps the Lambda handler (including 404/500). CORS can be enabled on `create()` or via `λ.use(cors())`:
+
+```typescript
+import { create } from 'lambda.ts';
+
+const λ = create({ cors: true }); // origin: "*"
+λ.use(async (_ctx, next) => {
+	const result = await next();
+	return result;
+});
+
+λ.route('/product/[s:%s]').get((Δ) => {
+	return λ.response(Δ.pathData).json();
+});
+
+export const handler = λ.handler;
+```
+
+```typescript
+import { create, cors } from 'lambda.ts';
+
+const λ = create();
+λ.use(cors({
+	origin: 'https://app.example.com',
+	credentials: true,
+}));
+```
+
 ...will provide S3 object manipulation
 
 ```typescript

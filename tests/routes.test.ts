@@ -30,6 +30,19 @@ describe("Routing", () => {
     expect(result.body).toBeUndefined();
   });
 
+  it("matches DELETE method", async () => {
+    const λ = create();
+    λ.route('/foo').delete(() => λ.response().code(204).basic());
+
+    const result = await simulator(λ.handler, {
+      method: "DELETE",
+      path: "/foo"
+    });
+
+    expect(result.statusCode).toBe(204);
+    expect(result.body).toBeUndefined();
+  });
+
   it("matches with root path", async () => {
     const λ = create();
     λ.route('/').get(() => λ.response('foo').basic());
