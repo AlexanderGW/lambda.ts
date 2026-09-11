@@ -71,6 +71,20 @@ describe("Routing", () => {
     expect(JSON.parse(result.body!)).toStrictEqual({});
   });
 
+  it("strips an HTTP API stage prefix from rawPath", async () => {
+    const λ = create();
+    λ.route('/v1/me').get(() => λ.response({ ok: true }).json());
+
+    const result = await simulator(λ.handler, {
+      method: "GET",
+      path: "/test/v1/me",
+      stage: "test",
+    });
+
+    expect(result.statusCode).toBe(200);
+    expect(JSON.parse(result.body!)).toStrictEqual({ ok: true });
+  });
+
   // it("matches with query string parmeters", async () => {
   //   const λ = create();
   //   λ.route("/foo?s=[%s]").get((Δ) => λ.response(Δ.queryData).json());

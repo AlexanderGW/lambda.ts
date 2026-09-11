@@ -3,9 +3,11 @@ import type { APIGatewayProxyEventV2, APIGatewayProxyHandlerV2, APIGatewayProxyS
 export interface FakeLambdaInvocation {
   method?: string;
   path?: string;
+  stage?: string;
   query?: Record<string, string | number | boolean>;
   body?: any;
   headers?: Record<string, string>;
+  jwtClaims?: Record<string, string | number | boolean | string[]>;
 }
 
 /** Simulate a fake AWS API Gateway Lambda V2 invocation */
@@ -21,7 +23,9 @@ export async function simulator(
     path = "/",
     query = {},
     body = undefined,
-    headers = {}
+    headers = {},
+    jwtClaims,
+    stage
   } = input;
 
   const queryString =
@@ -39,7 +43,11 @@ export async function simulator(
     requestContext: {
       http: {
         method
-      }
+      },
+      ...(stage ? { stage } : {}),
+      ...(jwtClaims
+        ? { authorizer: { jwt: { claims: jwtClaims } } }
+        : {}),
     },
 
     // Only include queryStringParameters if present

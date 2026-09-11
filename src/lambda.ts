@@ -2,6 +2,7 @@ import {
   LambdaClient,
 } from "@aws-sdk/client-lambda";
 import type {
+	APIGatewayEventRequestContextJWTAuthorizer,
 	APIGatewayProxyEventV2,
 	APIGatewayProxyHandlerV2,
 	APIGatewayProxyStructuredResultV2,
@@ -54,9 +55,16 @@ export interface CreateOptions {
 	cors?: true | CorsOptions;
 }
 
+/** HTTP API v2 event. `authorizer` is set when the route uses a JWT authorizer. */
+export type HttpApiEvent = APIGatewayProxyEventV2 & {
+	requestContext: APIGatewayProxyEventV2['requestContext'] & {
+		authorizer?: APIGatewayEventRequestContextJWTAuthorizer;
+	};
+};
+
 export interface HandlerContext {
 	lambda: LambdaClient;
-	event: APIGatewayProxyEventV2;
+	event: HttpApiEvent;
 	context: Context;
 	pathData: Record<string, string>;
 	pathSpec: Record<string, RouteDataType>,
@@ -310,6 +318,17 @@ function mergeHeaders(
 			...extra,
 		},
 	};
+}
+
+/** HTTP API named stages appear as a prefix on `rawPath` (e.g. `/test/v1/me`). */
+function routePath(event: APIGatewayProxyEventV2): string {
+	const raw = event.rawPath || "/";
+	const stage = event.requestContext?.stage;
+	if (!stage || stage === "$default") return raw;
+	const prefix = `/${stage}`;
+	if (raw === prefix) return "/";
+	if (raw.startsWith(`${prefix}/`)) return raw.slice(prefix.length) || "/";
+	return raw;
 }
 
 function compose(
@@ -896,7 +915,7 @@ export function create(options?: CreateOptions): LambdaApp {
 					const method = (event.requestContext?.http?.method ||
 						"GET") as HttpMethod;
 
-					const path = event.rawPath || "/";
+					const path = routePath(event);
 
 					let matchedRoute: RouteDefinition | null = null;
 
