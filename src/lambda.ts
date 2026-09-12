@@ -63,26 +63,41 @@ export type HttpApiEvent = APIGatewayProxyEventV2 & {
 };
 
 export interface HandlerContext {
+	/** Lambda client */
 	lambda: LambdaClient;
+	/** HTTP API event */
 	event: HttpApiEvent;
+	/** Lambda context */
 	context: Context;
+	/** Path data from the route */
 	pathData: Record<string, string>;
+	/** Path spec from the route */
 	pathSpec: Record<string, RouteDataType>,
+	/** Query spec from the route */
 	querySpec: Record<string, RouteDataType>;
 }
 
 export interface LambdaState {
+	/** Executor function */
 	exec: () => Promise<APIGatewayProxyStructuredResultV2>,
+	/** Key/value store */
 	kv: Record<string, any>,
+	/** Log map */
 	log: Map<string, LogDefinition[]>,
+	/** Object map */
 	object: Map<string, ObjectDefinition>,
+	/** Route definitions */
 	route: RouteDefinition[],
+	/** Middleware functions */
 	middleware: Middleware[],
 };
 
+/** Route handler */
 export type RouteHandler<Q = any> = (
-  ctx: HandlerContext,
-  query?: Q,
+	/** Handler context */
+	ctx: HandlerContext,
+	/** Query parameters */
+	query?: Q,
 ) => Promise<any> | any;
 
 export interface LambdaResponse {
